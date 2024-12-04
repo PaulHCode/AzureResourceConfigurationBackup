@@ -9,28 +9,14 @@ param packageUri string = 'https://raw.githubusercontent.com/shawntmeyer/Sentine
 @description('The PowerShell version')
 param powerShellVersion string = '7.4'
 
-@description('The Sentinel Workspace Name')
-param sentinelWorkspaceName string
-
-@description('The Sentinel Subscription Id')
-param sentinelSubscriptionId string = subscription().subscriptionId
-
-@description('The Sentinel Resource Group Name')
-param sentinelResourceGroupName string
-
 var cloudSuffix = replace(replace(environment().resourceManager, 'https://management.', ''), '/', '')
 var hostingPlanName = functionAppName
 var applicationInsightsName = functionAppName
 var storageAccountName = toLower(take('${functionAppName}${uniqueString(resourceGroup().id, functionAppName)}', 24))
-var sentinelAnalyticsContainerNames = [
-  'sentinelanalyticsinput'
-  'sentinelanalyticsoutput'
+var resourceConfig = [
+  'backup'
+  'resourceconfigrestoreinput'
 ]
-
-resource sentinel 'Microsoft.OperationsManagement/solutions@2015-11-01-preview' existing = {
-  name: sentinelWorkspaceName
-  scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroupName)
-}
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2022-05-01' = {
   name: storageAccountName
@@ -49,7 +35,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2022-05-01' = {
 }
 
 resource blobContainers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = [
-  for containerName in sentinelAnalyticsContainerNames: {
+  for containerName in resourceConfig: {
     name: containerName
     parent: storageAccount::blobServices
     properties: {
@@ -107,16 +93,8 @@ resource functionApp 'Microsoft.Web/sites@2021-03-01' = {
           value: 'powershell'
         }
         {
-          name: 'SentinelResourceId'
-          value: sentinel.id
-        }
-        {
-          name: 'LogAnalyticsResourceId'
-          value: sentinel.properties.workspaceResourceId
-        }
-        {
-          name: 'SentinelAnalyticsOutputUrl'
-          value: '${storageAccount.properties.primaryEndpoints.blob}${sentinelAnalyticsContainerNames[1]}'
+          name: 'ResourceConfigOutputURL'
+          value: '${storageAccount.properties.primaryEndpoints.blob}${resourceConfig[0]}'
         }
       ]
       cors: {
@@ -165,14 +143,3 @@ module roleAssignmentStorageAccount 'modules/roleAssignment-storageAccount.bicep
     roleDefinitionId: 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b' // Storage Blob Data Contributor
   }
 }
-
-module logAnalyticsSentinelContributorRoleAssignment 'modules/roleAssignment-logAnalyticsWorkspace.bicep' = {
-  name: 'roleAssignment-logAnalyticsWorkspace'
-  scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroupName)
-  params: {
-    principalId: functionApp.identity.principalId
-    logAnalyticsWorkspaceId: sentinel.properties.workspaceResourceId
-    roleDefinitionId: 'ab8e14d6-4a74-4a29-9ba8-549422addade' // Sentinel Contributor role'
-  }
-}
-
